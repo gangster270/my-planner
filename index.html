@@ -158,6 +158,19 @@
   body.widget-mode .task .txt{font-size:14px;}
   body.widget-mode .task{padding:9px 9px 9px 10px;}
   body.widget-mode .task .del{display:none;}
+  .wg-toolbar{margin-bottom:10px;}
+  .wg-toggle{display:inline-flex; gap:3px; background:var(--bg); border-radius:9px; padding:3px;}
+  .wg-toggle button{border:none; background:none; padding:5px 14px; border-radius:7px; font-size:12px; font-weight:700; color:var(--sub); cursor:pointer; font-family:inherit;}
+  .wg-toggle button.active{background:#fff; color:var(--text); box-shadow:var(--shadow);}
+  .wg-day{margin-top:14px;}
+  .wg-day-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; padding-bottom:5px; border-bottom:1px solid var(--border2);}
+  .wg-day-name{font-size:13px; font-weight:800;}
+  .wg-day-name .d{color:var(--sub); font-weight:600; margin-left:5px; font-size:12px;}
+  .wg-day.today .wg-day-name{color:var(--primary);}
+  .wg-day.weekend .wg-day-name{color:var(--high);}
+  .wg-cnt{font-size:11px; font-weight:700; color:var(--sub); background:var(--bg); padding:2px 7px; border-radius:7px;}
+  .wg-cnt.full{color:var(--done); background:#E7F8F1;}
+  .wg-empty{font-size:12px; color:var(--sub); padding:2px 2px 4px;}
 
   .overlay{position:fixed; inset:0; background:rgba(0,0,0,0.35); display:none; align-items:center; justify-content:center; z-index:100; padding:20px;}
   .overlay.show{display:flex;}
@@ -298,7 +311,8 @@
         <div class="w-date" id="wgDate">—</div>
         <button class="today-btn" id="wgExit">✕ 전체 화면</button>
       </div>
-      <div class="w-sub"><span>오늘 진행률</span><b id="wgPct">0%</b></div>
+      <div class="wg-toolbar"><div class="wg-toggle" id="wgToggle"><button data-r="week" onclick="setWR('week')">이번 주</button><button data-r="3day" onclick="setWR('3day')">3일</button></div></div>
+      <div class="w-sub"><span id="wgProgLabel">이번 주 진행률</span><b id="wgPct">0%</b></div>
       <div class="bar"><div class="bar-fill" id="wgBar" style="width:0%"></div></div>
       <div id="widgetBody"></div>
     </div>
@@ -377,6 +391,7 @@ let curMonth=new Date(); curMonth.setDate(1); curMonth.setHours(0,0,0,0);
 let filterCat='all'; const addCat={};
 let currentView='week';
 let widgetMode=false; try{widgetMode=localStorage.getItem('wp_widget')==='1';}catch(e){}
+let widgetRange='week'; try{const r=localStorage.getItem('wp_wrange'); if(r==='week'||r==='3day')widgetRange=r;}catch(e){}
 
 /* ===== D-day ===== */
 function dday(due){const t=new Date(); t.setHours(0,0,0,0); const d=new Date(due+'T00:00:00'); return Math.round((d-t)/86400000);}
@@ -492,29 +507,44 @@ function renderMonth(){
   }
 }
 
-/* ===== 위젯 렌더 ===== */
+/* ===== 위젯 렌더 (이번 주 / 3일) ===== */
+function setWR(r){widgetRange=r; try{localStorage.setItem('wp_wrange',r);}catch(e){} renderWidget();}
 function renderWidget(){
   const now=new Date();
-  document.getElementById('wgDate').textContent=`🌱 오늘 · ${now.getMonth()+1}월 ${now.getDate()}일 (${DAYS[(now.getDay()+6)%7]})`;
-  const tt=getTasks(todayStr); const td=tt.filter(x=>x.done).length;
-  const pct=tt.length?Math.round(td/tt.length*100):0;
+  document.getElementById('wgDate').textContent=`🌱 ${now.getMonth()+1}월 ${now.getDate()}일 (${DAYS[(now.getDay()+6)%7]})`;
+  document.querySelectorAll('#wgToggle button').forEach(b=>b.classList.toggle('active',b.dataset.r===widgetRange));
+
+  let days;
+  if(widgetRange==='3day') days=[0,1,2].map(i=>addDays(now,i));
+  else { const mon=getMonday(now); days=Array.from({length:7},(_,i)=>addDays(mon,i)); }
+  const rangeSet=new Set(days.map(fmt));
+
+  let total=0,done=0;
+  days.forEach(d=>{const a=getTasks(fmt(d)); total+=a.length; done+=a.filter(x=>x.done).length;});
+  const pct=total?Math.round(done/total*100):0;
   document.getElementById('wgPct').textContent=pct+'%';
   document.getElementById('wgBar').style.width=pct+'%';
+  document.getElementById('wgProgLabel').textContent=(widgetRange==='3day'?'3일':'이번 주')+' 진행률';
 
-  const seen=new Set(), overdue=[], todayL=[], soon=[];
-  for(const ds in data.tasks)for(const t of getTasks(ds)){ if(t.done||!t.due)continue; if(dday(t.due)<0){overdue.push({t,ds}); seen.add(t.id);} }
-  for(const t of getTasks(todayStr)){ if(t.done||seen.has(t.id))continue; todayL.push({t,ds:todayStr}); seen.add(t.id); }
-  for(const ds in data.tasks)for(const t of getTasks(ds)){ if(t.done||seen.has(t.id)||!t.due)continue; const n=dday(t.due); if(n>=0&&n<=2){soon.push({t,ds}); seen.add(t.id);} }
-  const byDue=(a,b)=>((a.t.due||'')<(b.t.due||'')?-1:1);
-  const pr={high:0,mid:1,low:2};
-  overdue.sort(byDue); soon.sort(byDue); todayL.sort((a,b)=>pr[a.t.priority]-pr[b.t.priority]);
-
-  const sec=(cls,title,arr)=>`<div class="w-sec ${cls}"><div class="w-sec-title">${title}<span class="badge">${arr.length}</span></div><div class="w-list">${arr.map(o=>taskHTML(o.t,o.ds)).join('')}</div></div>`;
   let html='';
-  if(overdue.length) html+=sec('over','🚩 기한 지남',overdue);
-  if(todayL.length) html+=sec('today','📌 오늘 할일',todayL);
-  if(soon.length) html+=sec('soon','⏰ 마감 임박 (2일 내)',soon);
-  if(!html) html='<div class="w-empty">급하게 처리할 일이 없어요 🎉<br>오늘도 좋은 하루 되세요!</div>';
+  // 표시 범위 밖의 기한 지난 할일만 상단에 모아서 경고
+  const overdue=[];
+  for(const ds in data.tasks)for(const t of getTasks(ds)){ if(!t.done&&t.due&&dday(t.due)<0&&!rangeSet.has(ds)) overdue.push({t,ds}); }
+  overdue.sort((a,b)=>((a.t.due||'')<(b.t.due||'')?-1:1));
+  if(overdue.length) html+=`<div class="w-sec over"><div class="w-sec-title">🚩 기한 지남<span class="badge">${overdue.length}</span></div><div class="w-list">${overdue.map(o=>taskHTML(o.t,o.ds)).join('')}</div></div>`;
+
+  // 요일별 세로 배치
+  days.forEach(d=>{
+    const ds=fmt(d); const tasks=sortTasks(getTasks(ds)); const td2=tasks.filter(x=>x.done).length;
+    const isToday=ds===todayStr, wd=d.getDay(), weekend=(wd===0||wd===6);
+    html+=`<div class="wg-day ${isToday?'today':''} ${weekend?'weekend':''}">
+      <div class="wg-day-head">
+        <div class="wg-day-name">${DAYS[(wd+6)%7]}<span class="d">${d.getMonth()+1}/${d.getDate()}</span>${isToday?' · 오늘':''}</div>
+        <div class="wg-cnt ${tasks.length>0&&td2===tasks.length?'full':''}">${td2}/${tasks.length}</div>
+      </div>
+      ${tasks.length?`<div class="w-list">${tasks.map(t=>taskHTML(t,ds)).join('')}</div>`:`<div class="wg-empty">비어 있음</div>`}
+    </div>`;
+  });
   document.getElementById('widgetBody').innerHTML=html;
 }
 
