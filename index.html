@@ -225,6 +225,30 @@
   .footer{display:flex; gap:8px; justify-content:center; margin-top:20px;}
   .footer button{border:1px solid var(--border); background:#fff; padding:8px 14px; border-radius:10px; font-size:12px; color:var(--sub); cursor:pointer; font-family:inherit; font-weight:600;}
   .footer button:hover{background:var(--card);}
+  .memo-panel{position:fixed; top:0; right:0; width:320px; height:100vh; background:var(--card); box-shadow:-4px 0 24px rgba(0,0,0,0.10); z-index:90; display:flex; flex-direction:column; transform:translateX(100%); transition:transform .25s ease;}
+  body.memo-open .memo-panel{transform:translateX(0);}
+  body.memo-open{margin-right:320px;}
+  @media (max-width:1000px){body.memo-open{margin-right:0;}}
+  body.widget-mode.memo-open{margin-right:0;}
+  .memo-head{display:flex; justify-content:space-between; align-items:center; padding:18px 18px 14px; border-bottom:1px solid var(--border2);}
+  .memo-title{font-size:16px; font-weight:800;}
+  .memo-body{flex:1; overflow-y:auto; padding:16px 18px 24px;}
+  .memo-sec-label{font-size:12px; font-weight:700; color:var(--sub); margin-bottom:8px;}
+  .memo-text{width:100%; min-height:150px; border:1px solid var(--border); border-radius:12px; padding:12px; font-size:14px; font-family:inherit; resize:vertical; outline:none; line-height:1.6;}
+  .memo-text:focus{border-color:var(--primary);}
+  .memo-add input{width:100%; border:1px solid var(--border); border-radius:10px; padding:9px 11px; font-size:13px; font-family:inherit; outline:none; margin-bottom:8px;}
+  .memo-add input:focus{border-color:var(--primary);}
+  .memo-list{display:flex; flex-direction:column; gap:5px;}
+  .memo-item{display:flex; align-items:flex-start; gap:8px; padding:8px 9px; border-radius:9px; background:var(--bg);}
+  .memo-item .check{width:18px; height:18px; border-radius:6px; border:2px solid var(--border); cursor:pointer; flex-shrink:0; margin-top:1px; display:flex; align-items:center; justify-content:center; transition:.12s; background:#fff;}
+  .memo-item .check:hover{border-color:var(--primary);}
+  .memo-item.done .check{background:var(--done); border-color:var(--done);}
+  .memo-item .check svg{width:11px; height:11px; opacity:0;}
+  .memo-item.done .check svg{opacity:1;}
+  .memo-item .txt{flex:1; font-size:13px; line-height:1.45; word-break:break-word;}
+  .memo-item.done .txt{color:var(--sub); text-decoration:line-through;}
+  .memo-item .del{opacity:.45; color:var(--sub); cursor:pointer; font-size:13px; flex-shrink:0; transition:.12s;}
+  .memo-item .del:hover{opacity:1; color:var(--high);}
 
   .hidden{display:none !important;}
   .task-list::-webkit-scrollbar,.week-scroll::-webkit-scrollbar{height:6px; width:6px;}
@@ -240,6 +264,7 @@
         <button class="tab active" data-view="week">주간</button>
         <button class="tab" data-view="month">월간</button>
       </div>
+      <button class="today-btn" id="memoToggle">📝 메모</button>
       <button class="today-btn" id="widgetToggle">🪟 위젯</button>
     </div>
   </div>
@@ -325,6 +350,18 @@
     <button id="exportBtn">데이터 내보내기</button>
     <button id="importBtn">불러오기</button>
     <input type="file" id="importFile" accept="application/json" class="hidden">
+  </div>
+</div>
+
+<!-- 메모 패널 -->
+<div id="memoPanel" class="memo-panel">
+  <div class="memo-head"><div class="memo-title">📝 메모</div><button class="close-x" id="memoClose">✕</button></div>
+  <div class="memo-body">
+    <div class="memo-sec-label">자유 메모</div>
+    <textarea id="memoText" class="memo-text" placeholder="무엇이든 자유롭게 적어두세요"></textarea>
+    <div class="memo-sec-label" style="margin-top:18px;">체크리스트</div>
+    <div class="memo-add"><input id="memoInput" placeholder="+ 항목 추가 후 Enter"></div>
+    <div id="memoList" class="memo-list"></div>
   </div>
 </div>
 
@@ -676,6 +713,33 @@ document.getElementById('importFile').onchange=e=>{const f=e.target.files[0]; if
   r.readAsText(f);};
 
 renderAll(); updateViews();
+
+/* ===== 메모 패널 ===== */
+if(!data.memo) data.memo={text:'',items:[]};
+let memoOpen=false; try{memoOpen=localStorage.getItem('wp_memo')==='1';}catch(e){}
+function setMemo(on){memoOpen=on; try{localStorage.setItem('wp_memo',on?'1':'0');}catch(e){} document.body.classList.toggle('memo-open',on);}
+function muid(){return 'm'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);}
+function renderMemo(){
+  document.getElementById('memoText').value=data.memo.text||'';
+  document.getElementById('memoList').innerHTML=(data.memo.items||[]).map(it=>`
+    <div class="memo-item ${it.done?'done':''}" data-id="${it.id}">
+      <div class="check" data-act="mcheck"><svg viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5L10 3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div class="txt">${esc(it.text)}</div>
+      <div class="del" data-act="mdel">✕</div>
+    </div>`).join('')||'<div class="empty">체크 항목이 없어요</div>';
+}
+document.getElementById('memoToggle').onclick=()=>setMemo(!memoOpen);
+document.getElementById('memoClose').onclick=()=>setMemo(false);
+document.getElementById('memoText').addEventListener('input',e=>{data.memo.text=e.target.value; save();});
+document.getElementById('memoInput').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.value.trim()){data.memo.items.push({id:muid(),text:e.target.value.trim(),done:false}); e.target.value=''; save(); renderMemo();}});
+document.getElementById('memoList').addEventListener('click',e=>{
+  const item=e.target.closest('.memo-item'), act=e.target.closest('[data-act]'); if(!item||!act)return;
+  const id=item.dataset.id, a=act.dataset.act;
+  if(a==='mcheck'){const it=data.memo.items.find(x=>x.id===id); if(it){it.done=!it.done; save(); renderMemo();}}
+  else if(a==='mdel'){data.memo.items=data.memo.items.filter(x=>x.id!==id); save(); renderMemo();}
+});
+document.body.classList.toggle('memo-open',memoOpen);
+renderMemo();
 </script>
 </body>
 </html>
