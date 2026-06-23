@@ -63,7 +63,7 @@
   .sep{width:1px; height:13px; background:var(--border); margin:0 2px;}
 
   .week-scroll{overflow-x:auto; padding-bottom:6px;}
-  .week-grid{display:grid; grid-template-columns:repeat(7,minmax(220px,1fr)); gap:12px; min-width:1624px;}
+  .week-grid{display:grid; grid-template-columns:repeat(7,minmax(176px,1fr)); gap:10px; min-width:1220px;}
   .day-col{background:var(--card); border-radius:16px; box-shadow:var(--shadow); display:flex; flex-direction:column; min-height:340px; overflow:hidden;}
   .day-col.today{box-shadow:0 0 0 2px var(--primary), var(--shadow);}
   .day-head{padding:13px 14px 10px; border-bottom:1px solid var(--border2); display:flex; align-items:center; justify-content:space-between;}
@@ -103,6 +103,9 @@
   .task .del{opacity:0; color:var(--sub); cursor:pointer; font-size:13px; flex-shrink:0; line-height:1.3; transition:.12s; align-self:center;}
   .task:hover .del{opacity:1;}
   .task .del:hover{color:var(--high);}
+  .task[draggable="true"]{cursor:grab;}
+  .task.dragging{opacity:.4;}
+  .day-col.drop-over{outline:2px dashed var(--primary); outline-offset:-2px; background:var(--primary-light);}
 
   .add-row{padding:8px 10px 10px; border-top:1px solid var(--border2); display:flex; flex-direction:column; gap:7px;}
   .add-line{display:flex; gap:6px;}
@@ -424,8 +427,8 @@ function overdueCount(){let c=0; for(const k in data.tasks)for(const t of data.t
 
 /* ===== 렌더 ===== */
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function taskHTML(t,ds){const c=t.category||'work'; const di=t.due?ddayInfo(t.due):null; return `
-  <div class="task cat-${c} ${t.done?'done':''}" data-id="${t.id}" data-ds="${ds}">
+function taskHTML(t,ds,drag){const c=t.category||'work'; const di=t.due?ddayInfo(t.due):null; return `
+  <div class="task cat-${c} ${t.done?'done':''}"${drag?' draggable="true"':''} data-id="${t.id}" data-ds="${ds}">
     <div class="check" data-act="toggle"><svg viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5L10 3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="pri-dot" data-act="pri" style="background:${PCOLOR[t.priority]}" title="우선순위"></div>
     <div class="txt" data-act="edit">${esc(t.text)}</div>
@@ -457,12 +460,13 @@ function renderWeek(){
     const ac=addCat[ds]||(filterCat!=='all'?filterCat:'work');
     const col=document.createElement('div');
     col.className='day-col'+(isToday?' today':'')+(isWeekend?' weekend':'');
+    col.dataset.ds=ds;
     col.innerHTML=`
       <div class="day-head">
         <div class="day-name">${DAYS[i]}<span class="date">${d.getMonth()+1}/${d.getDate()}</span></div>
         <div class="head-right">${flag?`<span class="hflag">🚩${flag}</span>`:''}<div class="day-cnt ${vt.length>0&&dDone===vt.length?'full':''}">${dDone}/${vt.length}</div></div>
       </div>
-      <div class="task-list">${vt.map(t=>taskHTML(t,ds)).join('')}</div>
+      <div class="task-list" data-ds="${ds}">${vt.map(t=>taskHTML(t,ds,true)).join('')}</div>
       <div class="add-row">
         <div class="add-line">
           <button class="cat-sw" data-ds="${ds}" data-cat="${ac}" title="분류 전환">${CAT[ac].icon}</button>
@@ -633,7 +637,12 @@ function taskClick(e){
   if(task&&act){const ds=task.dataset.ds,id=task.dataset.id,a=act.dataset.act;
     if(a==='toggle')toggleTask(ds,id); else if(a==='pri')cyclePri(ds,id); else if(a==='cat')toggleCat(ds,id); else if(a==='edit')openEdit(ds,id); else if(a==='del')delTask(ds,id);}
 }
-document.getElementById('weekGrid').addEventListener('click',taskClick);
+const _wg=document.getElementById('weekGrid');
+_wg.addEventListener('click',taskClick);
+_wg.addEventListener('dragstart',e=>{const t=e.target.closest('.task'); if(t&&t.dataset.id){e.dataTransfer.setData('text/plain',JSON.stringify({ds:t.dataset.ds,id:t.dataset.id})); e.dataTransfer.effectAllowed='move'; t.classList.add('dragging');}});
+_wg.addEventListener('dragend',()=>{document.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging')); document.querySelectorAll('.drop-over').forEach(x=>x.classList.remove('drop-over'));});
+_wg.addEventListener('dragover',e=>{const col=e.target.closest('.day-col'); if(!col)return; e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.day-col.drop-over').forEach(x=>{if(x!==col)x.classList.remove('drop-over');}); col.classList.add('drop-over');});
+_wg.addEventListener('drop',e=>{const col=e.target.closest('.day-col'); if(!col)return; e.preventDefault(); col.classList.remove('drop-over'); try{const d=JSON.parse(e.dataTransfer.getData('text/plain')); const srcDs=d.ds,id=d.id,tgtDs=col.dataset.ds; if(srcDs!==tgtDs){const arr=rawTasks(srcDs); const idx=arr.findIndex(x=>x.id===id); if(idx>=0){const [tk]=arr.splice(idx,1); if(!data.tasks[tgtDs])data.tasks[tgtDs]=[]; data.tasks[tgtDs].push(tk); save(); renderAll();}}}catch(err){}});
 document.getElementById('dmTasks').addEventListener('click',taskClick);
 document.getElementById('widgetBody').addEventListener('click',taskClick);
 document.getElementById('weekGrid').addEventListener('keydown',e=>{
