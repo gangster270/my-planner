@@ -254,6 +254,16 @@
   .note-text{font-size:14px; line-height:1.6; white-space:pre-wrap; word-break:break-word; outline:none; min-height:22px; padding-right:18px; color:#3a3a3a;}
   .note-del{position:absolute; top:9px; right:11px; opacity:.35; cursor:pointer; font-size:13px; color:#555; transition:.12s;}
   .note-del:hover{opacity:1; color:var(--high);}
+  .wd-pick{display:flex; gap:5px; margin-bottom:14px;}
+  .wd-pick button{flex:1; border:1px solid var(--border); background:#fff; padding:9px 0; border-radius:9px; font-size:13px; font-weight:700; color:var(--sub); cursor:pointer; font-family:inherit; transition:.12s;}
+  .wd-pick button.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+  .pick button.on{background:var(--primary); border-color:var(--primary); color:#fff;}
+  .rc-list{display:flex; flex-direction:column; gap:7px;}
+  .rc-item{display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid var(--border2); border-radius:10px; background:var(--bg);}
+  .rc-item .ri-txt{font-size:13px; font-weight:700;}
+  .rc-item .ri-sub{font-size:11px; color:var(--sub); font-weight:500; margin-top:2px;}
+  .rc-item .ri-del{color:var(--sub); cursor:pointer; font-size:13px;}
+  .rc-item .ri-del:hover{color:var(--high);}
 
   .hidden{display:none !important;}
   .task-list::-webkit-scrollbar,.week-scroll::-webkit-scrollbar{height:6px; width:6px;}
@@ -269,6 +279,7 @@
         <button class="tab active" data-view="week">주간</button>
         <button class="tab" data-view="month">월간</button>
       </div>
+      <button class="today-btn" id="recurToggle">🔁 반복</button>
       <button class="today-btn" id="memoToggle">📝 메모</button>
       <button class="today-btn" id="widgetToggle">🪟 위젯</button>
     </div>
@@ -399,6 +410,33 @@
       <div class="sec-label">기한</div>
       <div class="date-row"><input type="date" class="date-in" id="edDue"><button class="clr-btn" id="edDueClear">지우기</button></div>
       <div class="edit-btns"><button class="btn-del" id="edDelete">삭제</button><button class="btn-save" id="edSave">저장</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 반복 업무 -->
+<div class="overlay" id="recurOverlay">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head"><div class="modal-title">🔁 반복 업무</div><button class="close-x" id="rcClose">✕</button></div>
+    <div class="modal-body">
+      <input type="text" class="edit-text" id="rcText" placeholder="반복할 업무 내용 (예: 센서 점검)">
+      <div class="sec-label">분류</div>
+      <div class="pick" id="rcCat"><button data-c="work" class="sel work">💼 업무</button><button data-c="personal">🏠 개인</button></div>
+      <div class="sec-label">우선순위</div>
+      <div class="pick" id="rcPri"><button data-p="high">🔴 높음</button><button data-p="mid" class="sel mid">🟡 보통</button><button data-p="low">⚪ 낮음</button></div>
+      <div class="sec-label">주기</div>
+      <div class="pick" id="rcFreq"><button data-f="daily">매일</button><button data-f="weekly" class="on">매주</button><button data-f="monthly">매달</button></div>
+      <div id="rcWeek">
+        <div class="sec-label">요일 (복수 선택)</div>
+        <div class="wd-pick" id="rcWeekdays"><button data-d="0">월</button><button data-d="1">화</button><button data-d="2">수</button><button data-d="3">목</button><button data-d="4">금</button><button data-d="5">토</button><button data-d="6">일</button></div>
+      </div>
+      <div id="rcMonth" class="hidden">
+        <div class="sec-label">매달 며칠</div>
+        <div class="date-row"><select id="rcMonthday" class="date-in"><option value="1">1일</option><option value="2">2일</option><option value="3">3일</option><option value="4">4일</option><option value="5">5일</option><option value="6">6일</option><option value="7">7일</option><option value="8">8일</option><option value="9">9일</option><option value="10">10일</option><option value="11">11일</option><option value="12">12일</option><option value="13">13일</option><option value="14">14일</option><option value="15">15일</option><option value="16">16일</option><option value="17">17일</option><option value="18">18일</option><option value="19">19일</option><option value="20">20일</option><option value="21">21일</option><option value="22">22일</option><option value="23">23일</option><option value="24">24일</option><option value="25">25일</option><option value="26">26일</option><option value="27">27일</option><option value="28">28일</option><option value="29">29일</option><option value="30">30일</option><option value="31">31일</option></select></div>
+      </div>
+      <button id="rcAdd" class="btn-save" style="width:100%; padding:13px; border:none; border-radius:11px; font-weight:700; cursor:pointer; font-family:inherit; font-size:14px;">+ 반복 추가</button>
+      <div class="sec-label" style="margin-top:22px;">등록된 반복 업무</div>
+      <div id="rcList" class="rc-list"></div>
     </div>
   </div>
 </div>
@@ -755,6 +793,94 @@ memoNotesBox.addEventListener('input',e=>{
 });
 document.body.classList.toggle('memo-open',memoOpen);
 renderMemo();
+
+/* ===== 반복 업무 ===== */
+if(!Array.isArray(data.recur)) data.recur=[];
+let rcCat='work', rcPri='mid', rcFreq='weekly';
+const rcWeekSet=new Set(); let rcMonthday=1;
+
+function matchRule(r,d){
+  if(r.freq==='daily') return true;
+  if(r.freq==='weekly') return (r.weekdays||[]).includes((d.getDay()+6)%7);
+  if(r.freq==='monthly') return d.getDate()===r.monthday;
+  return false;
+}
+function generateRecurring(){
+  const today=new Date(); today.setHours(0,0,0,0);
+  const end=addDays(today,120);
+  data.recur.forEach(r=>{
+    let start = r.lastGen ? addDays(new Date(r.lastGen+'T00:00:00'),1) : new Date(today);
+    start.setHours(0,0,0,0);
+    for(let d=new Date(start); d<=end; d=addDays(d,1)){
+      if(matchRule(r,d)){
+        const ds=fmt(d);
+        if(!data.tasks[ds]) data.tasks[ds]=[];
+        if(!data.tasks[ds].some(t=>t.rid===r.id))
+          data.tasks[ds].push({id:uid(),text:r.text,priority:r.priority||'mid',category:r.category||'work',done:false,rid:r.id});
+      }
+    }
+    r.lastGen=fmt(end);
+  });
+  save();
+}
+function describeRule(r){
+  let s;
+  if(r.freq==='daily') s='매일';
+  else if(r.freq==='weekly') s='매주 '+(r.weekdays||[]).slice().sort((a,b)=>a-b).map(i=>DAYS[i]).join('·');
+  else s='매달 '+r.monthday+'일';
+  return CAT[r.category||'work'].icon+' '+s;
+}
+function renderRecurList(){
+  const box=document.getElementById('rcList');
+  if(!data.recur.length){box.innerHTML='<div class="empty">등록된 반복 업무가 없어요</div>'; return;}
+  box.innerHTML=data.recur.map(r=>`
+    <div class="rc-item" data-id="${r.id}">
+      <div style="flex:1"><div class="ri-txt">${esc(r.text)}</div><div class="ri-sub">${describeRule(r)}</div></div>
+      <div class="ri-del" data-act="rdel">✕</div>
+    </div>`).join('');
+}
+function updateRecurSub(){
+  document.getElementById('rcWeek').classList.toggle('hidden',rcFreq!=='weekly');
+  document.getElementById('rcMonth').classList.toggle('hidden',rcFreq!=='monthly');
+}
+function openRecur(){
+  rcCat='work'; rcPri='mid'; rcFreq='weekly'; rcWeekSet.clear(); rcMonthday=new Date().getDate();
+  document.getElementById('rcText').value='';
+  setPick('rcCat','c',rcCat); setPick('rcPri','p',rcPri);
+  document.querySelectorAll('#rcFreq button').forEach(b=>b.classList.toggle('on',b.dataset.f===rcFreq));
+  document.querySelectorAll('#rcWeekdays button').forEach(b=>b.classList.remove('on'));
+  document.getElementById('rcMonthday').value=rcMonthday;
+  updateRecurSub(); renderRecurList();
+  document.getElementById('recurOverlay').classList.add('show');
+}
+document.getElementById('recurToggle').onclick=openRecur;
+document.getElementById('rcClose').onclick=()=>document.getElementById('recurOverlay').classList.remove('show');
+document.getElementById('recurOverlay').onclick=e=>{if(e.target.id==='recurOverlay')e.currentTarget.classList.remove('show');};
+document.getElementById('rcCat').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){rcCat=b.dataset.c; setPick('rcCat','c',rcCat);}});
+document.getElementById('rcPri').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){rcPri=b.dataset.p; setPick('rcPri','p',rcPri);}});
+document.getElementById('rcFreq').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){rcFreq=b.dataset.f; document.querySelectorAll('#rcFreq button').forEach(x=>x.classList.toggle('on',x===b)); updateRecurSub();}});
+document.getElementById('rcWeekdays').addEventListener('click',e=>{const b=e.target.closest('button'); if(b){const d=+b.dataset.d; if(rcWeekSet.has(d)){rcWeekSet.delete(d); b.classList.remove('on');}else{rcWeekSet.add(d); b.classList.add('on');}}});
+document.getElementById('rcMonthday').addEventListener('change',e=>{rcMonthday=+e.target.value;});
+document.getElementById('rcAdd').onclick=()=>{
+  const text=document.getElementById('rcText').value.trim();
+  if(!text){alert('반복할 업무 내용을 입력하세요'); return;}
+  if(rcFreq==='weekly'&&rcWeekSet.size===0){alert('요일을 하나 이상 선택하세요'); return;}
+  const rule={id:'r'+uid(),text,category:rcCat,priority:rcPri,freq:rcFreq};
+  if(rcFreq==='weekly') rule.weekdays=[...rcWeekSet];
+  if(rcFreq==='monthly') rule.monthday=rcMonthday;
+  data.recur.push(rule);
+  generateRecurring(); renderAll(); renderRecurList();
+  document.getElementById('rcText').value=''; rcWeekSet.clear();
+  document.querySelectorAll('#rcWeekdays button').forEach(b=>b.classList.remove('on'));
+};
+document.getElementById('rcList').addEventListener('click',e=>{
+  const del=e.target.closest('[data-act="rdel"]'); if(!del)return;
+  const id=del.closest('.rc-item').dataset.id;
+  data.recur=data.recur.filter(x=>x.id!==id);
+  for(const ds in data.tasks){ if(ds>=todayStr) data.tasks[ds]=data.tasks[ds].filter(t=>!(t.rid===id&&!t.done)); }
+  save(); renderAll(); renderRecurList();
+});
+generateRecurring(); renderAll();
 </script>
 </body>
 </html>
