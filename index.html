@@ -264,6 +264,11 @@
   .rc-item .ri-sub{font-size:11px; color:var(--sub); font-weight:500; margin-top:2px;}
   .rc-item .ri-del{color:var(--sub); cursor:pointer; font-size:13px;}
   .rc-item .ri-del:hover{color:var(--high);}
+  .weekdrop{position:fixed; top:50%; transform:translateY(-50%); z-index:95; display:none; align-items:center; justify-content:center; width:74px; height:170px; border-radius:16px; font-size:13px; font-weight:800; color:var(--primary); background:var(--primary-light); border:2px dashed var(--primary); text-align:center; padding:10px; line-height:1.5; box-shadow:var(--shadow);}
+  .weekdrop.left{left:10px;} .weekdrop.right{right:10px;}
+  body.memo-open .weekdrop.right{right:332px;}
+  body.dragging-task .weekdrop{display:flex;}
+  .weekdrop.over{background:var(--primary); color:#fff; transform:translateY(-50%) scale(1.05);}
 
   .hidden{display:none !important;}
   .task-list::-webkit-scrollbar,.week-scroll::-webkit-scrollbar{height:6px; width:6px;}
@@ -368,6 +373,10 @@
     <input type="file" id="importFile" accept="application/json" class="hidden">
   </div>
 </div>
+
+<!-- 주 이동 드롭존 -->
+<div id="dropPrevWeek" class="weekdrop left">‹<br>지난 주로</div>
+<div id="dropNextWeek" class="weekdrop right">다음 주로<br>›</div>
 
 <!-- 메모 패널 -->
 <div id="memoPanel" class="memo-panel">
@@ -716,8 +725,8 @@ function taskClick(e){
 }
 const _wg=document.getElementById('weekGrid');
 _wg.addEventListener('click',taskClick);
-_wg.addEventListener('dragstart',e=>{const t=e.target.closest('.task'); if(t&&t.dataset.id){e.dataTransfer.setData('text/plain',JSON.stringify({ds:t.dataset.ds,id:t.dataset.id})); e.dataTransfer.effectAllowed='move'; t.classList.add('dragging');}});
-_wg.addEventListener('dragend',()=>{document.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging')); document.querySelectorAll('.drop-over').forEach(x=>x.classList.remove('drop-over'));});
+_wg.addEventListener('dragstart',e=>{const t=e.target.closest('.task'); if(t&&t.dataset.id){e.dataTransfer.setData('text/plain',JSON.stringify({ds:t.dataset.ds,id:t.dataset.id})); e.dataTransfer.effectAllowed='move'; t.classList.add('dragging'); document.body.classList.add('dragging-task');}});
+_wg.addEventListener('dragend',()=>{document.querySelectorAll('.dragging').forEach(x=>x.classList.remove('dragging')); document.querySelectorAll('.drop-over,.weekdrop.over').forEach(x=>x.classList.remove('drop-over','over')); document.body.classList.remove('dragging-task');});
 _wg.addEventListener('dragover',e=>{const col=e.target.closest('.day-col'); if(!col)return; e.preventDefault(); e.dataTransfer.dropEffect='move'; document.querySelectorAll('.day-col.drop-over').forEach(x=>{if(x!==col)x.classList.remove('drop-over');}); col.classList.add('drop-over');});
 _wg.addEventListener('drop',e=>{const col=e.target.closest('.day-col'); if(!col)return; e.preventDefault(); col.classList.remove('drop-over'); try{const d=JSON.parse(e.dataTransfer.getData('text/plain')); const srcDs=d.ds,id=d.id,tgtDs=col.dataset.ds; if(srcDs!==tgtDs){const arr=rawTasks(srcDs); const idx=arr.findIndex(x=>x.id===id); if(idx>=0){const [tk]=arr.splice(idx,1); if(!data.tasks[tgtDs])data.tasks[tgtDs]=[]; data.tasks[tgtDs].push(tk); save(); renderAll();}}}catch(err){}});
 document.getElementById('dmTasks').addEventListener('click',taskClick);
@@ -869,7 +878,28 @@ document.getElementById('rcAdd').onclick=()=>{
   if(rcFreq==='weekly') rule.weekdays=[...rcWeekSet];
   if(rcFreq==='monthly') rule.monthday=rcMonthday;
   data.recur.push(rule);
-  generateRecurring(); renderAll(); renderRecurList();
+  generateRecurring(); renderAll();
+
+/* ===== 주 단위 이동 (다음/지난 주로 드래그) ===== */
+function moveTaskByDays(srcDs,id,days){
+  const arr=rawTasks(srcDs); const idx=arr.findIndex(x=>x.id===id); if(idx<0)return;
+  const [tk]=arr.splice(idx,1);
+  const nd=fmt(addDays(new Date(srcDs+'T00:00:00'),days));
+  if(!data.tasks[nd]) data.tasks[nd]=[];
+  data.tasks[nd].push(tk); save(); renderAll();
+}
+(function(){
+  function setup(el,weeks){
+    if(!el) return;
+    el.addEventListener('dragover',e=>{e.preventDefault(); e.dataTransfer.dropEffect='move'; el.classList.add('over');});
+    el.addEventListener('dragleave',()=>el.classList.remove('over'));
+    el.addEventListener('drop',e=>{e.preventDefault(); el.classList.remove('over');
+      try{const d=JSON.parse(e.dataTransfer.getData('text/plain')); moveTaskByDays(d.ds,d.id,weeks*7);}catch(err){}
+    });
+  }
+  setup(document.getElementById('dropPrevWeek'),-1);
+  setup(document.getElementById('dropNextWeek'),1);
+})(); renderRecurList();
   document.getElementById('rcText').value=''; rcWeekSet.clear();
   document.querySelectorAll('#rcWeekdays button').forEach(b=>b.classList.remove('on'));
 };
