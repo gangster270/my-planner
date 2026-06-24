@@ -91,6 +91,9 @@
   .task.done .check svg{opacity:1;}
   .task .pri-dot{width:7px; height:7px; border-radius:50%; flex-shrink:0; margin-top:6px; cursor:pointer;}
   .task .txt{font-size:13px; line-height:1.4; word-break:break-word; flex:1; cursor:pointer;}
+  .task .txt .task-time{font-weight:800; color:var(--primary);}
+  .task.done .txt .task-time{color:var(--sub);}
+  .task-divider{height:1px; background:var(--border); margin:3px 6px; border-radius:1px;}
   .task.done .txt{color:var(--sub); text-decoration:line-through;}
   .dchip{font-size:10px; font-weight:800; padding:1px 6px; border-radius:6px; flex-shrink:0; align-self:center; letter-spacing:-0.2px;}
   .dchip.over{background:#FDECEE; color:var(--high);}
@@ -490,10 +493,21 @@ function ddayInfo(due){const n=dday(due); if(n<0) return {n,label:'D+'+(-n),cls:
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 function getTasks(ds){return (data.tasks[ds]||[]).map(t=>({category:'work',...t}));}
 function rawTasks(ds){return data.tasks[ds]||[];}
+function parseTime(text){
+  const s=(text||'').trim();
+  let m=s.match(/^(\d{1,2}):(\d{2})\b/);
+  if(m){const h=+m[1],mi=+m[2]; if(h<24&&mi<60) return h*60+mi;}
+  m=s.match(/^(오전|오후)?\s*(\d{1,2})\s*시\s*(?:(\d{1,2})\s*분)?/);
+  if(m){let h=+m[2]; const mi=m[3]?+m[3]:0; if(m[1]==='오후'&&h<12)h+=12; if(m[1]==='오전'&&h===12)h=0; if(h<24&&mi<60) return h*60+mi;}
+  return null;
+}
+function taskTime(t){const v=parseTime(t.text); return v==null?Infinity:v;}
 function sortTasks(arr){
   const o={high:0,mid:1,low:2};
   return arr.slice().sort((a,b)=>{
     if(a.done!==b.done) return a.done?1:-1;
+    const ta=taskTime(a), tb=taskTime(b);
+    if(ta!==tb) return ta-tb;
     const ua=(a.due&&dday(a.due)<=0)?0:1, ub=(b.due&&dday(b.due)<=0)?0:1;
     if(ua!==ub) return ua-ub;
     if(o[a.priority]!==o[b.priority]) return o[a.priority]-o[b.priority];
@@ -513,15 +527,39 @@ function overdueCount(){let c=0; for(const k in data.tasks)for(const t of data.t
 
 /* ===== 렌더 ===== */
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function taskHTML(t,ds,drag){const c=t.category||'work'; const di=t.due?ddayInfo(t.due):null; return `
+function splitTime(text){
+  const s=text||'';
+  let m=s.match(/^(\d{1,2}):(\d{2})([\s\S]*)$/);
+  if(m){const h=+m[1],mi=+m[2]; if(h<24&&mi<60) return {t:m[1]+':'+m[2], rest:m[3].replace(/^\s+/,'')};}
+  m=s.match(/^((?:오전|오후)?\s*\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?)([\s\S]*)$/);
+  if(m) return {t:m[1].trim(), rest:m[2].replace(/^\s+/,'')};
+  return null;
+}
+function taskHTML(t,ds,drag){
+  const c=t.category||'work'; const di=t.due?ddayInfo(t.due):null;
+  const sp=splitTime(t.text);
+  const txt = sp ? `<span class="task-time">${esc(sp.t)}</span>${sp.rest?' '+esc(sp.rest):''}` : esc(t.text);
+  return `
   <div class="task cat-${c} ${t.done?'done':''}"${drag?' draggable="true"':''} data-id="${t.id}" data-ds="${ds}">
     <div class="check" data-act="toggle"><svg viewBox="0 0 12 12" fill="none"><path d="M2 6l2.5 2.5L10 3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
     <div class="pri-dot" data-act="pri" style="background:${PCOLOR[t.priority]}" title="우선순위"></div>
-    <div class="txt" data-act="edit">${esc(t.text)}</div>
+    <div class="txt" data-act="edit">${txt}</div>
     ${di?`<span class="dchip ${di.cls}">${di.label}</span>`:''}
     <div class="cat-icon" data-act="cat" title="업무/개인 전환">${CAT[c].icon}</div>
     <div class="del" data-act="del">✕</div>
-  </div>`;}
+  </div>`;
+}
+function renderTaskList(tasks,ds,drag){
+  let html='', seenTimed=false, placed=false;
+  tasks.forEach(t=>{
+    const timed=!t.done && taskTime(t)!==Infinity;
+    const untimed=!t.done && taskTime(t)===Infinity;
+    if(timed) seenTimed=true;
+    if(!placed && seenTimed && untimed){ html+='<div class="task-divider"></div>'; placed=true; }
+    html+=taskHTML(t,ds,drag);
+  });
+  return html;
+}
 
 function weekDates(){return Array.from({length:7},(_,i)=>addDays(curMonday,i));}
 function renderWeek(){
@@ -552,7 +590,7 @@ function renderWeek(){
         <div class="day-name">${DAYS[i]}<span class="date">${d.getMonth()+1}/${d.getDate()}</span></div>
         <div class="head-right">${flag?`<span class="hflag">🚩${flag}</span>`:''}<div class="day-cnt ${vt.length>0&&dDone===vt.length?'full':''}">${dDone}/${vt.length}</div></div>
       </div>
-      <div class="task-list" data-ds="${ds}">${vt.map(t=>taskHTML(t,ds,true)).join('')}</div>
+      <div class="task-list" data-ds="${ds}">${renderTaskList(vt,ds,true)}</div>
       <div class="add-row">
         <div class="add-line">
           <button class="cat-sw" data-ds="${ds}" data-cat="${ac}" title="분류 전환">${CAT[ac].icon}</button>
@@ -662,7 +700,7 @@ function openDay(ds){
   document.getElementById('dayOverlay').classList.add('show');
 }
 function setPick(boxId,attr,val){document.querySelectorAll('#'+boxId+' button').forEach(b=>{b.className=''; if(b.dataset[attr]===val) b.className='sel '+val;});}
-function renderModalTasks(){const tasks=sortTasks(getTasks(modalDS)); const box=document.getElementById('dmTasks'); box.innerHTML=tasks.length?tasks.map(t=>taskHTML(t,modalDS)).join(''):'<div class="empty">아직 할일이 없어요</div>';}
+function renderModalTasks(){const tasks=sortTasks(getTasks(modalDS)); const box=document.getElementById('dmTasks'); box.innerHTML=tasks.length?renderTaskList(tasks,modalDS):'<div class="empty">아직 할일이 없어요</div>';}
 function closeDay(){if(modalDS){data.logs[modalDS]=document.getElementById('dmLog').value; save(); renderAll();} document.getElementById('dayOverlay').classList.remove('show'); modalDS=null;}
 
 /* ===== 수정 모달 ===== */
