@@ -290,6 +290,7 @@
       <button class="today-btn" id="recurToggle">🔁 반복</button>
       <button class="today-btn" id="memoToggle">📝 메모</button>
       <button class="today-btn" id="widgetToggle">🪟 위젯</button>
+      <button class="today-btn" id="ghSyncBtn">⚙️ PC 연동</button>
     </div>
   </div>
 
@@ -467,8 +468,64 @@
 /* ===== 저장 ===== */
 const KEY='weeklyPlanner_v1'; let mem=null;
 function load(){try{const r=localStorage.getItem(KEY); if(r) return JSON.parse(r);}catch(e){} if(mem) return mem; return {tasks:{},logs:{}};}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(data));}catch(e){mem=data;}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(data));}catch(e){mem=data;} ghPushDebounced();}
 let data=load();
+
+/* ===== GitHub 동기화 (다중 PC 연동) ===== */
+const GH_CFG_KEY='wp_gh_config';
+function ghConfig(){try{const c=localStorage.getItem(GH_CFG_KEY); if(c) return JSON.parse(c);}catch(e){} return null;}
+function ghSetup(){
+  const owner=prompt('GitHub 사용자명 (예: gangster270)'); if(!owner)return;
+  const repo=prompt('데이터 저장용 저장소 이름 (예: planner-data)'); if(!repo)return;
+  const token=prompt('GitHub Personal Access Token\n(Contents: Read and write 권한)'); if(!token)return;
+  localStorage.setItem(GH_CFG_KEY, JSON.stringify({owner,repo,path:'planner-data.json',token}));
+  alert('설정 완료! 동기화를 시작합니다.');
+  ghPull();
+}
+async function ghApi(cfg,method,body){
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${cfg.path}`;
+  const headers={'Authorization':`Bearer ${cfg.token}`,'Accept':'application/vnd.github+json'};
+  if(method==='GET'){const res=await fetch(url,{headers}); if(res.status===404)return null; if(!res.ok)throw new Error('조회 실패: '+res.status); return res.json();}
+  headers['Content-Type']='application/json';
+  const res=await fetch(url,{method:'PUT',headers,body:JSON.stringify(body)});
+  if(!res.ok)throw new Error('저장 실패: '+res.status);
+  return res.json();
+}
+function b64EncodeUnicode(str){return btoa(unescape(encodeURIComponent(str)));}
+function b64DecodeUnicode(str){return decodeURIComponent(escape(atob(str)));}
+function normalizeData(d){
+  if(!d.tasks)d.tasks={}; if(!d.logs)d.logs={};
+  if(!Array.isArray(d.memoNotes))d.memoNotes=[];
+  if(!Array.isArray(d.recur))d.recur=[];
+  return d;
+}
+let ghSyncing=false, ghPushTimer=null;
+function ghPushDebounced(){clearTimeout(ghPushTimer); ghPushTimer=setTimeout(ghPush,1500);}
+async function ghPush(){
+  const cfg=ghConfig(); if(!cfg||ghSyncing)return; ghSyncing=true;
+  try{
+    data._syncedAt=Date.now();
+    const current=await ghApi(cfg,'GET');
+    const body={message:'플래너 업데이트 '+new Date().toLocaleString('ko-KR'), content:b64EncodeUnicode(JSON.stringify(data))};
+    if(current)body.sha=current.sha;
+    await ghApi(cfg,'PUT',body);
+    localStorage.setItem(KEY,JSON.stringify(data));
+  }catch(e){console.error(e);}
+  finally{ghSyncing=false;}
+}
+async function ghPull(){
+  const cfg=ghConfig(); if(!cfg)return;
+  try{
+    const file=await ghApi(cfg,'GET'); if(!file)return;
+    const remote=normalizeData(JSON.parse(b64DecodeUnicode(file.content)));
+    const localTs=data._syncedAt||0, remoteTs=remote._syncedAt||0;
+    if(remoteTs>localTs){
+      data=remote;
+      localStorage.setItem(KEY,JSON.stringify(data));
+      renderAll(); renderMemo(); renderRecurList();
+    }
+  }catch(e){console.error(e);}
+}
 
 /* ===== 메타 ===== */
 const DAYS=['월','화','수','목','금','토','일'];
@@ -808,6 +865,7 @@ document.getElementById('importFile').onchange=e=>{const f=e.target.files[0]; if
   r.readAsText(f);};
 
 renderAll(); updateViews();
+document.getElementById('ghSyncBtn').onclick=ghSetup;
 
 /* ===== 메모 패널 (메모지 카드) ===== */
 const NOTE_COLORS=['#FFF9DB','#E7F8F1','#EFF5FF','#FCEEF3','#F4F0FF','#FFF1E6'];
@@ -958,6 +1016,7 @@ document.getElementById('rcList').addEventListener('click',e=>{
   save(); renderAll(); renderRecurList();
 });
 generateRecurring(); renderAll();
+ghPull();
 </script>
 </body>
 </html>
